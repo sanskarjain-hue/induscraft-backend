@@ -30,6 +30,21 @@ router.get("/:id", auth, async (req, res) => {
   }
 });
 
+// GET /api/orders/next-id?channel=BL — returns next sequential order ID for a channel
+router.get("/next-id", auth, async (req, res) => {
+  try {
+    const prefixes = { Bangalore: "BL", Pune: "PU", Jodhpur: "JD", Website: "WB", Wholesale: "WS" };
+    const prefix = prefixes[req.query.channel];
+    if (!prefix) return res.status(400).json({ error: "Invalid channel" });
+    const orders = await Order.find({ id: new RegExp(`^${prefix}-`) }, { id: 1 });
+    const nums = orders.map(o => parseInt(o.id.replace(`${prefix}-`, "")) || 0).filter(n => !isNaN(n));
+    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+    res.json({ id: `${prefix}-${String(next).padStart(4, "0")}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/orders — create order
 router.post("/", auth, async (req, res) => {
   try {
