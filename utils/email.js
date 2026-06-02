@@ -8,22 +8,34 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Verify SMTP connection on startup
+transporter.verify((err, success) => {
+  if (err) {
+    console.error("SMTP connection failed:", err.message);
+  } else {
+    console.log("SMTP ready — emails will send");
+  }
+});
+
 async function sendEmail({ to, subject, html }) {
   try {
-    await transporter.sendMail({
+    console.log(`Attempting to send email to ${to}...`);
+    const info = await transporter.sendMail({
       from: `"Induscraft OMS" <${process.env.EMAIL_USER}>`,
       to,
       subject,
       html,
     });
-    console.log(`Email sent to ${to}: ${subject}`);
+    console.log(`Email sent to ${to}: ${subject} — MessageId: ${info.messageId}`);
   } catch (err) {
     console.error("Email error:", err.message);
+    console.error("Email error detail:", err);
   }
 }
 
 // New order created — notify Yash
 async function notifyNewOrder(order) {
+  console.log(`notifyNewOrder called for order ${order.id}`);
   const itemList = order.items
     .map(i => `<li>${i.name} × ${i.qty} — ₹${i.price.toLocaleString("en-IN")}</li>`)
     .join("");
