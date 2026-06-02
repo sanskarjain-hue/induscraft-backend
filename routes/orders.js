@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const auth = require("../middleware/auth");
 const Order = require("../models/Order");
+const { notifyNewOrder } = require("../utils/email");
 
 // GET /api/orders — get all orders
 router.get("/", auth, async (req, res) => {
@@ -34,6 +35,7 @@ router.post("/", auth, async (req, res) => {
       return res.status(403).json({ error: "Not authorized" });
     const order = new Order({ ...req.body, createdBy: req.user.id });
     await order.save();
+    notifyNewOrder(order).catch(err => console.error("Email failed:", err.message));
     res.status(201).json(order);
   } catch (err) {
     res.status(500).json({ error: err.message });
