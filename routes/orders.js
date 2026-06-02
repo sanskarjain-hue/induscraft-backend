@@ -7,9 +7,11 @@ const { notifyNewOrder } = require("../utils/email");
 // GET /api/orders — get all orders
 router.get("/", auth, async (req, res) => {
   try {
-    const { channel, stage } = req.query;
+    const { channel, stage, includeArchived } = req.query;
     let filter = {};
     if (channel) filter.channel = channel;
+    // by default exclude archived — pass ?includeArchived=true to get everything
+    if (!includeArchived) filter.status = { $ne: "archived" };
     const orders = await Order.find(filter).sort({ createdAt: -1 });
     res.json(orders);
   } catch (err) {
