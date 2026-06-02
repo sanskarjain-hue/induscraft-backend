@@ -8,6 +8,14 @@ const flagSchema = new mongoose.Schema({
   photos: [String],
 });
 
+const photoSchema = new mongoose.Schema({
+  name: String,
+  type: String,
+  url: String,
+  data: String, // base64 for locally uploaded
+  publicId: String,
+});
+
 const itemSchema = new mongoose.Schema({
   productId: String,
   name: String,
@@ -17,7 +25,11 @@ const itemSchema = new mongoose.Schema({
   woodColour: String,
   fabricCode: String,
   hardware: [String],
-  images: [{ name: String, type: String, url: String, publicId: String }],
+  images: [photoSchema],
+  measurementPhotos: [photoSchema],
+  rawPhotos: [photoSchema],
+  finishingPhotos: [photoSchema],
+  qcPhotos: [photoSchema],
   remarks: String,
   finishingSteps: [String],
   finishingProgress: { type: Map, of: String },
@@ -29,6 +41,7 @@ const itemSchema = new mongoose.Schema({
   originalDelivery: String,
   currentDelivery: String,
   packetCount: { type: Number, default: 0 },
+  rawPhotosApproved: { type: Boolean, default: false },
   flags: [flagSchema],
   qcNotes: String,
   qcStatus: { type: String, enum: ["pass", "fail", null], default: null },
@@ -47,6 +60,9 @@ const dispatchSchema = new mongoose.Schema({
   partner: String,
   driver: String,
   driverPhone: String,
+  courier: String,
+  trackingNo: String,
+  dispatchDate: String,
 });
 
 const orderSchema = new mongoose.Schema({
@@ -67,6 +83,11 @@ const orderSchema = new mongoose.Schema({
   value: { type: Number, required: true },
   advance: { type: Number, default: 0 },
   notes: String,
+  status: { type: String, enum: ["active", "archived"], default: "active" },
+  deliveryConfirmed: { type: Boolean, default: false },
+  costApproved: { type: Boolean, default: false },
+  marginOverride: { type: Boolean, default: false },
+  costs: { type: Map, of: Number },
   dispatchDetails: dispatchSchema,
   items: [itemSchema],
   payments: [paymentSchema],
