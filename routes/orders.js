@@ -59,12 +59,20 @@ router.post("/", auth, async (req, res) => {
   }
 });
 
-// PUT /api/orders/:id — full order update
+// PUT /api/orders/:id — full order update (handles id rename)
 router.put("/:id", auth, async (req, res) => {
   try {
+    const { id: newId, ...rest } = req.body;
+    const updateData = { ...rest, updatedAt: new Date() };
+    // If a new id is provided and it's different, update the id field too
+    if (newId && newId !== req.params.id) {
+      const conflict = await Order.findOne({ id: newId });
+      if (conflict) return res.status(409).json({ error: `Order ID ${newId} already exists` });
+      updateData.id = newId;
+    }
     const order = await Order.findOneAndUpdate(
       { id: req.params.id },
-      { ...req.body, updatedAt: new Date() },
+      updateData,
       { new: true }
     );
     if (!order) return res.status(404).json({ error: "Order not found" });
