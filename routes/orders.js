@@ -92,7 +92,11 @@ router.patch("/:id/item/:itemId/stage", auth, async (req, res) => {
     const item = order.items.id(req.params.itemId);
     if (!item) return res.status(404).json({ error: "Item not found" });
 
-    if (stageIndex !== undefined) item.stageIndex = stageIndex;
+    if (stageIndex !== undefined) {
+      item.stageIndex = stageIndex;
+      if (!item.stageHistory) item.stageHistory = [];
+      item.stageHistory.push({ stageIndex, enteredAt: new Date() });
+    }
     if (finishingProgress !== undefined) item.finishingProgress = finishingProgress;
     if (qcStatus !== undefined) item.qcStatus = qcStatus;
     if (qcNotes !== undefined) item.qcNotes = qcNotes;

@@ -38,6 +38,7 @@ const itemSchema = new mongoose.Schema({
   committedDate: String,
   actualDate: String,
   stageIndex: { type: Number, default: 0 },
+  stageHistory: [{ stageIndex: Number, enteredAt: { type: Date, default: Date.now } }],
   originalDelivery: String,
   currentDelivery: String,
   packetCount: { type: Number, default: 0 },
