@@ -53,6 +53,20 @@ router.post("/", auth, async (req, res) => {
     const order = new Order({ ...req.body, createdBy: req.user.id });
     await order.save();
     notifyNewOrder(order).catch(err => console.error("Email failed:", err.message));
+
+    // Upsert customer record — fire and forget, never blocks order save
+    if (order.customer?.phone) {
+      const Customer = require("../models/Customer");
+      const normalized = order.customer.phone.replace(/\D/g, "").replace(/^91/, "").slice(-10);
+      if (normalized.length >= 6) {
+        Customer.findOneAndUpdate(
+          { phone: { $regex: normalized + "$" } },
+          { phone: normalized, name: order.customer.name, address: order.customer.address, channel: order.channel, lastOrderId: order.id, updatedAt: new Date() },
+          { upsert: true, new: true }
+        ).catch(() => {}); // silent fail — never affects order
+      }
+    }
+
     res.status(201).json(order);
   } catch (err) {
     res.status(500).json({ error: err.message });
