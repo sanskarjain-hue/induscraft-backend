@@ -38,6 +38,69 @@ router.post("/change-password", auth, async (req, res) => {
   }
 });
 
+// GET /api/auth/users — list all users (admin only)
+router.get("/users", auth, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
+    const users = await User.find({}).select("-password").sort({ role: 1, name: 1 });
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/auth/users — create user (admin only)
+router.post("/users", auth, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
+    const { username, password, name, role } = req.body;
+    if (!username || !password || !name || !role) return res.status(400).json({ error: "All fields required" });
+    if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    const exists = await User.findOne({ username: username.toLowerCase() });
+    if (exists) return res.status(409).json({ error: "Username already taken" });
+    const initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+    const hashed = await bcrypt.hash(password, 10);
+    const user = await User.create({ username: username.toLowerCase(), password: hashed, name, initials, role });
+    res.status(201).json({ id: user._id, username: user.username, name: user.name, initials: user.initials, role: user.role });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/auth/users/:id — update user (admin only)
+router.put("/users/:id", auth, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
+    const { name, username, role, password } = req.body;
+    const update = {};
+    if (name) { update.name = name; update.initials = name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(); }
+    if (username) update.username = username.toLowerCase();
+    if (role) update.role = role;
+    if (password) {
+      if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+      update.password = await bcrypt.hash(password, 10);
+    }
+    const user = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select("-password");
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/auth/users/:id — remove user (admin only)
+router.delete("/users/:id", auth, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
+    // Prevent deleting yourself
+    if (req.params.id === req.user.id) return res.status(400).json({ error: "Cannot delete your own account" });
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/auth/me
 router.get("/me", auth, async (req, res) => {
   try {
