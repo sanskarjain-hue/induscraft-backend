@@ -26,6 +26,26 @@ app.use("/api/upload", require("./routes/upload"));
 app.use("/api/deals", require("./routes/deals"));
 app.use("/api/customers", require("./routes/customers"));
 
+// ── TEMP: migrate deal stages ─────────────────────────────
+app.get("/api/migrate-deal-stages", async (req, res) => {
+  if (req.query.secret !== "induscraft2026") return res.status(403).json({ error: "Forbidden" });
+  try {
+    const Deal = require("./models/Deal");
+    const map = { "Lead": "New Inquiry", "Design & Concept": "Warm", "Quoted": "Negotiation" };
+    let updated = 0;
+    const deals = await Deal.find({});
+    for (const deal of deals) {
+      if (map[deal.stage]) {
+        deal.stage = map[deal.stage];
+        await deal.save();
+        updated++;
+      }
+    }
+    res.json({ success: true, updated });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+// ── END TEMP ──────────────────────────────────────────────
+
 // ── HEALTH CHECK ──────────────────────────────────────────
 app.get("/", (req, res) => {
   res.json({ status: "Induscraft OMS API is running", version: "1.0.0" });

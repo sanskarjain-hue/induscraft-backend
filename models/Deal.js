@@ -16,8 +16,8 @@ const dealSchema = new mongoose.Schema({
   salesperson: { type: String, required: true },
   stage: {
     type: String,
-    enum: ["Lead", "Design & Concept", "Quoted", "Negotiation", "Won", "Lost"],
-    default: "Lead",
+    enum: ["New Inquiry", "Warm", "Cold", "Negotiation", "Won", "Lost"],
+    default: "New Inquiry",
   },
   lastContacted: String,
   lostReason: String,
