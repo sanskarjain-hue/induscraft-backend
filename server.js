@@ -46,6 +46,17 @@ app.get("/api/migrate-deal-stages", async (req, res) => {
 });
 // ── END TEMP ──────────────────────────────────────────────
 
+// ── TEMP: fix salesperson name in deals ──────────────────
+app.get("/api/fix-sanskar", async (req, res) => {
+  if (req.query.secret !== "induscraft2026") return res.status(403).json({ error: "Forbidden" });
+  try {
+    const Deal = require("./models/Deal");
+    const result = await Deal.updateMany({ salesperson: "Sanskar" }, { salesperson: "Sanskar Jain" });
+    res.json({ success: true, updated: result.modifiedCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+// ── END TEMP ──────────────────────────────────────────────
+
 // ── HEALTH CHECK ──────────────────────────────────────────
 app.get("/", (req, res) => {
   res.json({ status: "Induscraft OMS API is running", version: "1.0.0" });
