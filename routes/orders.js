@@ -25,7 +25,6 @@ router.get("/", auth, async (req, res) => {
     const { channel, stage, includeArchived } = req.query;
     let filter = {};
     if (channel) filter.channel = channel;
-    // by default exclude archived — pass ?includeArchived=true to get everything
     if (!includeArchived) filter.status = { $ne: "archived" };
     const orders = await Order.find(filter).sort({ createdAt: -1 });
     res.json(orders);
@@ -54,7 +53,6 @@ router.post("/", auth, async (req, res) => {
     await order.save();
     notifyNewOrder(order).catch(err => console.error("Email failed:", err.message));
 
-    // Upsert customer record — fire and forget, never blocks order save
     if (order.customer?.phone) {
       const Customer = require("../models/Customer");
       const normalized = order.customer.phone.replace(/\D/g, "").replace(/^91/, "").slice(-10);
@@ -74,12 +72,23 @@ router.post("/", auth, async (req, res) => {
 });
 
 // PUT /api/orders/:id — full order update (handles id rename, records edit log)
+//
+// IMPORTANT MONGOOSE GOTCHA — read before touching this route again:
+// Plain `Object.assign(order, updateData)` followed by `order.save()` does NOT
+// reliably persist changes to nested array/subdocument fields like `items`
+// (which itself contains nested arrays like `items[].images`). Mongoose's
+// dirty-checking can miss these because the assignment doesn't always go through
+// the schema-aware setters that mark a path as modified. This previously caused
+// product images (and other item-level edits) to appear to save successfully
+// — the response looked correct — but silently fail to persist, so the data
+// reverted on the next fetch. The fix is to explicitly call markModified() on
+// every top-level field that contains nested arrays/objects whenever we touch
+// it via Object.assign, every time, no exceptions.
 router.put("/:id", auth, async (req, res) => {
   try {
     const { id: newId, editLogEntry, ...rest } = req.body;
     const updateData = { ...rest, updatedAt: new Date() };
 
-    // If a new id is provided and it's different, update the id field too
     if (newId && newId !== req.params.id) {
       const conflict = await Order.findOne({ id: newId });
       if (conflict) return res.status(409).json({ error: `Order ID ${newId} already exists` });
@@ -91,7 +100,16 @@ router.put("/:id", auth, async (req, res) => {
 
     Object.assign(order, updateData);
 
-    // Append edit log entry if the client sent one (frontend decides what changed)
+    // Explicitly mark nested/array fields as modified — see note above.
+    // This is the actual fix for images (and anything else inside items[])
+    // silently failing to persist.
+    if (updateData.items !== undefined) order.markModified("items");
+    if (updateData.payments !== undefined) order.markModified("payments");
+    if (updateData.costs !== undefined) order.markModified("costs");
+    if (updateData.dispatchDetails !== undefined) order.markModified("dispatchDetails");
+    if (updateData.customer !== undefined) order.markModified("customer");
+    if (updateData.orderSheetFiles !== undefined) order.markModified("orderSheetFiles");
+
     if (editLogEntry) {
       if (!order.editLog) order.editLog = [];
       order.editLog.push({
@@ -99,6 +117,7 @@ router.put("/:id", auth, async (req, res) => {
         field: editLogEntry.field || "Order",
         changedAt: new Date(),
       });
+      order.markModified("editLog");
     }
 
     await order.save();
@@ -109,9 +128,6 @@ router.put("/:id", auth, async (req, res) => {
 });
 
 // DELETE /api/orders/:id — permanently delete an order (admin only)
-// This is intentionally separate from archiving. Archive (PUT with status: "archived")
-// is reversible and moves the order to Past Orders. Delete is irreversible and removes
-// the document entirely — for cleaning up test orders, duplicates, or mistaken entries.
 router.delete("/:id", auth, async (req, res) => {
   try {
     if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
@@ -143,6 +159,7 @@ router.patch("/:id/item/:itemId/stage", auth, async (req, res) => {
     if (qcNotes !== undefined) item.qcNotes = qcNotes;
     if (packetCount !== undefined) item.packetCount = packetCount;
     order.updatedAt = new Date();
+    order.markModified("items");
 
     await order.save();
     res.json(order);
@@ -169,6 +186,7 @@ router.patch("/:id/item/:itemId/vendor", auth, async (req, res) => {
     if (committedDate !== undefined) item.committedDate = committedDate;
     if (vendorId && item.stageIndex === 0) item.stageIndex = 1;
     order.updatedAt = new Date();
+    order.markModified("items");
 
     await order.save();
     res.json(order);
@@ -188,6 +206,7 @@ router.patch("/:id/item/:itemId/flag", auth, async (req, res) => {
 
     item.flags.push(req.body);
     order.updatedAt = new Date();
+    order.markModified("items");
     await order.save();
     res.json(order);
   } catch (err) {
@@ -207,6 +226,7 @@ router.patch("/:id/payment", auth, async (req, res) => {
     order.payments.push({ ...req.body, by: req.user.name });
     order.advance = order.payments.reduce((s, p) => s + p.amount, 0);
     order.updatedAt = new Date();
+    order.markModified("payments");
     await order.save();
     res.json(order);
   } catch (err) {
@@ -247,6 +267,7 @@ router.patch("/:id/item/:itemId/delay", auth, async (req, res) => {
 
     item.currentDelivery = currentDelivery;
     order.updatedAt = new Date();
+    order.markModified("items");
     await order.save();
     res.json(order);
   } catch (err) {
