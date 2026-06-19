@@ -4,6 +4,21 @@ const auth = require("../middleware/auth");
 const Order = require("../models/Order");
 const { notifyNewOrder } = require("../utils/email");
 
+// GET /api/orders/next-id?channel=BL — returns next sequential order ID for a channel
+router.get("/next-id", auth, async (req, res) => {
+  try {
+    const prefixes = { Bangalore: "BL", Pune: "PU", Jodhpur: "JD", Website: "WB", Wholesale: "WS" };
+    const prefix = prefixes[req.query.channel];
+    if (!prefix) return res.status(400).json({ error: "Invalid channel" });
+    const orders = await Order.find({ id: new RegExp(`^${prefix}-`) }, { id: 1 });
+    const nums = orders.map(o => parseInt(o.id.replace(`${prefix}-`, "")) || 0).filter(n => !isNaN(n));
+    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+    res.json({ id: `${prefix}-${String(next).padStart(4, "0")}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/orders — get all orders
 router.get("/", auth, async (req, res) => {
   try {
@@ -30,21 +45,6 @@ router.get("/:id", auth, async (req, res) => {
   }
 });
 
-// GET /api/orders/next-id?channel=BL — returns next sequential order ID for a channel
-router.get("/next-id", auth, async (req, res) => {
-  try {
-    const prefixes = { Bangalore: "BL", Pune: "PU", Jodhpur: "JD", Website: "WB", Wholesale: "WS" };
-    const prefix = prefixes[req.query.channel];
-    if (!prefix) return res.status(400).json({ error: "Invalid channel" });
-    const orders = await Order.find({ id: new RegExp(`^${prefix}-`) }, { id: 1 });
-    const nums = orders.map(o => parseInt(o.id.replace(`${prefix}-`, "")) || 0).filter(n => !isNaN(n));
-    const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
-    res.json({ id: `${prefix}-${String(next).padStart(4, "0")}` });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // POST /api/orders — create order
 router.post("/", auth, async (req, res) => {
   try {
@@ -63,7 +63,7 @@ router.post("/", auth, async (req, res) => {
           { phone: { $regex: normalized + "$" } },
           { phone: normalized, name: order.customer.name, address: order.customer.address, channel: order.channel, lastOrderId: order.id, updatedAt: new Date() },
           { upsert: true, new: true }
-        ).catch(() => {}); // silent fail — never affects order
+        ).catch(() => {});
       }
     }
 
@@ -73,24 +73,51 @@ router.post("/", auth, async (req, res) => {
   }
 });
 
-// PUT /api/orders/:id — full order update (handles id rename)
+// PUT /api/orders/:id — full order update (handles id rename, records edit log)
 router.put("/:id", auth, async (req, res) => {
   try {
-    const { id: newId, ...rest } = req.body;
+    const { id: newId, editLogEntry, ...rest } = req.body;
     const updateData = { ...rest, updatedAt: new Date() };
+
     // If a new id is provided and it's different, update the id field too
     if (newId && newId !== req.params.id) {
       const conflict = await Order.findOne({ id: newId });
       if (conflict) return res.status(409).json({ error: `Order ID ${newId} already exists` });
       updateData.id = newId;
     }
-    const order = await Order.findOneAndUpdate(
-      { id: req.params.id },
-      updateData,
-      { new: true }
-    );
+
+    const order = await Order.findOne({ id: req.params.id });
     if (!order) return res.status(404).json({ error: "Order not found" });
+
+    Object.assign(order, updateData);
+
+    // Append edit log entry if the client sent one (frontend decides what changed)
+    if (editLogEntry) {
+      if (!order.editLog) order.editLog = [];
+      order.editLog.push({
+        changedBy: req.user.name || "Unknown",
+        field: editLogEntry.field || "Order",
+        changedAt: new Date(),
+      });
+    }
+
+    await order.save();
     res.json(order);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/orders/:id — permanently delete an order (admin only)
+// This is intentionally separate from archiving. Archive (PUT with status: "archived")
+// is reversible and moves the order to Past Orders. Delete is irreversible and removes
+// the document entirely — for cleaning up test orders, duplicates, or mistaken entries.
+router.delete("/:id", auth, async (req, res) => {
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
+    const order = await Order.findOneAndDelete({ id: req.params.id });
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    res.json({ success: true, deletedId: req.params.id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

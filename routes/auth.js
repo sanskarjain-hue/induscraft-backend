@@ -20,28 +20,12 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// POST /api/auth/change-password — admin only
-router.post("/change-password", auth, async (req, res) => {
-  try {
-    if (req.user.role !== "admin")
-      return res.status(403).json({ error: "Admin only" });
-    const { username, newPassword } = req.body;
-    if (!username || !newPassword) return res.status(400).json({ error: "Username and new password required" });
-    if (newPassword.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
-    const hashed = await bcrypt.hash(newPassword, 10);
-    const user = await User.findOneAndUpdate({ username }, { password: hashed }, { new: true });
-    if (!user) return res.status(404).json({ error: "User not found" });
-    console.log(`Password changed for ${username} by admin`);
-    res.json({ success: true, username });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/auth/users — list all users (admin only)
+// GET /api/auth/users — list all users (any authenticated role)
+// Previously admin-only, which silently broke the salesperson dropdown in NewOrderForm
+// and Pipeline for non-admin logins (fetchUsers() 403'd and was swallowed by a .catch).
+// Listing names/roles is harmless for any logged-in user; only create/update/delete stay admin-only.
 router.get("/users", auth, async (req, res) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
     const users = await User.find({}).select("-password").sort({ role: 1, name: 1 });
     res.json(users);
   } catch (err) {
@@ -92,7 +76,6 @@ router.put("/users/:id", auth, async (req, res) => {
 router.delete("/users/:id", auth, async (req, res) => {
   try {
     if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
-    // Prevent deleting yourself
     if (req.params.id === req.user.id) return res.status(400).json({ error: "Cannot delete your own account" });
     await User.findByIdAndDelete(req.params.id);
     res.json({ success: true });

@@ -66,6 +66,15 @@ const dispatchSchema = new mongoose.Schema({
   dispatchDate: String,
 });
 
+// Whole-order edit log — records who changed something and when, without tracking
+// field-by-field diffs. Appended server-side whenever the frontend sends an
+// editLogEntry alongside a PUT /orders/:id (see routes/orders.js).
+const editLogSchema = new mongoose.Schema({
+  changedBy: String,
+  field: String, // short label, e.g. "Address", "Order info", "Product images"
+  changedAt: { type: Date, default: Date.now },
+});
+
 const orderSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
   channel: {
@@ -92,6 +101,7 @@ const orderSchema = new mongoose.Schema({
   dispatchDetails: dispatchSchema,
   items: [itemSchema],
   payments: [paymentSchema],
+  editLog: [editLogSchema],
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
