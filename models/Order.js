@@ -17,6 +17,18 @@ const photoSchema = new mongoose.Schema({
 });
 
 const itemSchema = new mongoose.Schema({
+  // FIX: this field was missing from the schema entirely. The frontend
+  // (NewOrderForm.jsx) generates a stable string id per item at creation time
+  // (e.g. "i_BL-0001_0") and uses it everywhere to identify which item an
+  // action applies to — advancing a stage, assigning a vendor, uploading
+  // photos, etc. Without this declared here, Mongoose's strict mode (the
+  // default) silently dropped the field on every save, so every item fetched
+  // back from the database had `id: undefined`. That made every "is this the
+  // item I clicked" check (`item.id !== clickedId`) evaluate to
+  // `undefined !== undefined` — false for every item — so actions meant for
+  // one item were applied to all items in the order. Declaring `id: String`
+  // here makes Mongoose actually persist and return it.
+  id: String,
   productId: String,
   name: String,
   qty: Number,
