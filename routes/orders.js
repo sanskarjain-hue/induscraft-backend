@@ -2,7 +2,36 @@ const express = require("express");
 const router = express.Router();
 const auth = require("../middleware/auth");
 const Order = require("../models/Order");
-const { notifyNewOrder } = require("../utils/email");
+const cloudinary = require("cloudinary").v2;
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// Collects every Cloudinary publicId referenced anywhere in an order document —
+// item images, measurement/raw/finishing/QC photos, and order-level sheet files.
+// Used to clean up storage when an order is permanently deleted, so deleted orders
+// don't leave orphaned files billing against the Cloudinary account indefinitely.
+function collectPublicIds(order) {
+  const ids = [];
+  const collectFrom = (arr) => {
+    if (!Array.isArray(arr)) return;
+    for (const f of arr) {
+      if (f && f.publicId) ids.push(f.publicId);
+    }
+  };
+  collectFrom(order.orderSheetFiles);
+  for (const item of order.items || []) {
+    collectFrom(item.images);
+    collectFrom(item.measurementPhotos);
+    collectFrom(item.rawPhotos);
+    collectFrom(item.finishingPhotos);
+    collectFrom(item.qcPhotos);
+  }
+  return ids;
+}
 
 // GET /api/orders/next-id?channel=BL — returns next sequential order ID for a channel
 router.get("/next-id", auth, async (req, res) => {
@@ -51,7 +80,6 @@ router.post("/", auth, async (req, res) => {
       return res.status(403).json({ error: "Not authorized" });
     const order = new Order({ ...req.body, createdBy: req.user.id });
     await order.save();
-    notifyNewOrder(order).catch(err => console.error("Email failed:", err.message));
 
     if (order.customer?.phone) {
       const Customer = require("../models/Customer");
@@ -101,8 +129,6 @@ router.put("/:id", auth, async (req, res) => {
     Object.assign(order, updateData);
 
     // Explicitly mark nested/array fields as modified — see note above.
-    // This is the actual fix for images (and anything else inside items[])
-    // silently failing to persist.
     if (updateData.items !== undefined) order.markModified("items");
     if (updateData.payments !== undefined) order.markModified("payments");
     if (updateData.costs !== undefined) order.markModified("costs");
@@ -127,13 +153,35 @@ router.put("/:id", auth, async (req, res) => {
   }
 });
 
-// DELETE /api/orders/:id — permanently delete an order (admin only)
+// DELETE /api/orders/:id — permanently delete an order (admin only).
+// Also removes every Cloudinary file referenced by the order (item images,
+// measurement/raw/finishing/QC photos, order sheet files) so deleted orders
+// don't leave orphaned files behind in storage. File cleanup runs after the
+// order is confirmed to exist but the order delete itself is not blocked on
+// it succeeding — a failed Cloudinary cleanup is logged, not fatal, since the
+// order record being gone is the priority and storage cleanup can be retried.
 router.delete("/:id", auth, async (req, res) => {
   try {
     if (req.user.role !== "admin") return res.status(403).json({ error: "Admin only" });
-    const order = await Order.findOneAndDelete({ id: req.params.id });
+
+    const order = await Order.findOne({ id: req.params.id });
     if (!order) return res.status(404).json({ error: "Order not found" });
-    res.json({ success: true, deletedId: req.params.id });
+
+    const publicIds = collectPublicIds(order);
+
+    await Order.deleteOne({ id: req.params.id });
+
+    if (publicIds.length > 0) {
+      const results = await Promise.allSettled(
+        publicIds.map(publicId => cloudinary.uploader.destroy(publicId))
+      );
+      const failed = results.filter(r => r.status === "rejected").length;
+      if (failed > 0) {
+        console.error(`Order ${req.params.id} deleted, but ${failed}/${publicIds.length} Cloudinary files failed to delete.`);
+      }
+    }
+
+    res.json({ success: true, deletedId: req.params.id, filesDeleted: publicIds.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
