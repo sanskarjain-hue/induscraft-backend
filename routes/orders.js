@@ -123,29 +123,46 @@ router.put("/:id", auth, async (req, res) => {
       updateData.id = newId;
     }
 
-    // Use findOneAndUpdate instead of findOne+save to avoid Mongoose version
-    // conflicts when two saves fire in rapid succession (e.g. image preview
-    // save followed immediately by the Cloudinary URL save). The $set operator
-    // applies the update atomically so concurrent saves don't collide on __v.
-    const update = { $set: updateData };
+    // Retry up to 3 times on version conflicts — these happen when two saves
+    // fire in rapid succession (e.g. image preview save followed immediately
+    // by the Cloudinary URL save). Each retry re-fetches the latest document
+    // so it picks up the previous save before applying the new changes.
+    let order;
+    let attempts = 0;
+    while (attempts < 3) {
+      try {
+        order = await Order.findOne({ id: req.params.id });
+        if (!order) return res.status(404).json({ error: "Order not found" });
 
-    if (editLogEntry) {
-      update.$push = {
-        editLog: {
-          changedBy: req.user.name || "Unknown",
-          field: editLogEntry.field || "Order",
-          changedAt: new Date(),
-        },
-      };
+        Object.assign(order, updateData);
+
+        if (updateData.items !== undefined) order.markModified("items");
+        if (updateData.payments !== undefined) order.markModified("payments");
+        if (updateData.costs !== undefined) order.markModified("costs");
+        if (updateData.dispatchDetails !== undefined) order.markModified("dispatchDetails");
+        if (updateData.customer !== undefined) order.markModified("customer");
+        if (updateData.orderSheetFiles !== undefined) order.markModified("orderSheetFiles");
+
+        if (editLogEntry) {
+          if (!order.editLog) order.editLog = [];
+          order.editLog.push({
+            changedBy: req.user.name || "Unknown",
+            field: editLogEntry.field || "Order",
+            changedAt: new Date(),
+          });
+          order.markModified("editLog");
+        }
+
+        await order.save();
+        break;
+      } catch (saveErr) {
+        if (saveErr.name === "VersionError" && attempts < 2) {
+          attempts++;
+          continue;
+        }
+        throw saveErr;
+      }
     }
-
-    const order = await Order.findOneAndUpdate(
-      { id: req.params.id },
-      update,
-      { new: true, runValidators: false }
-    );
-
-    if (!order) return res.status(404).json({ error: "Order not found" });
 
     res.json(order);
   } catch (err) {
