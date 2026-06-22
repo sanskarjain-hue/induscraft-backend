@@ -123,30 +123,30 @@ router.put("/:id", auth, async (req, res) => {
       updateData.id = newId;
     }
 
-    const order = await Order.findOne({ id: req.params.id });
-    if (!order) return res.status(404).json({ error: "Order not found" });
-
-    Object.assign(order, updateData);
-
-    // Explicitly mark nested/array fields as modified — see note above.
-    if (updateData.items !== undefined) order.markModified("items");
-    if (updateData.payments !== undefined) order.markModified("payments");
-    if (updateData.costs !== undefined) order.markModified("costs");
-    if (updateData.dispatchDetails !== undefined) order.markModified("dispatchDetails");
-    if (updateData.customer !== undefined) order.markModified("customer");
-    if (updateData.orderSheetFiles !== undefined) order.markModified("orderSheetFiles");
+    // Use findOneAndUpdate instead of findOne+save to avoid Mongoose version
+    // conflicts when two saves fire in rapid succession (e.g. image preview
+    // save followed immediately by the Cloudinary URL save). The $set operator
+    // applies the update atomically so concurrent saves don't collide on __v.
+    const update = { $set: updateData };
 
     if (editLogEntry) {
-      if (!order.editLog) order.editLog = [];
-      order.editLog.push({
-        changedBy: req.user.name || "Unknown",
-        field: editLogEntry.field || "Order",
-        changedAt: new Date(),
-      });
-      order.markModified("editLog");
+      update.$push = {
+        editLog: {
+          changedBy: req.user.name || "Unknown",
+          field: editLogEntry.field || "Order",
+          changedAt: new Date(),
+        },
+      };
     }
 
-    await order.save();
+    const order = await Order.findOneAndUpdate(
+      { id: req.params.id },
+      update,
+      { new: true, runValidators: false }
+    );
+
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
     res.json(order);
   } catch (err) {
     res.status(500).json({ error: err.message });
