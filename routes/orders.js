@@ -143,11 +143,16 @@ router.put("/:id", auth, async (req, res) => {
         if (updateData.customer !== undefined) order.markModified("customer");
         if (updateData.orderSheetFiles !== undefined) order.markModified("orderSheetFiles");
 
-        if (editLogEntry) {
+        // Always append an edit-log entry, even if the frontend didn't supply a
+        // specific field label — this is the safety net that makes logging
+        // comprehensive. Every mutation to an order (stage changes, QC, photos,
+        // order info, notes, etc.) currently goes through this one PUT route from
+        // the frontend, so this fallback is what guarantees nothing saves silently.
+        {
           if (!order.editLog) order.editLog = [];
           order.editLog.push({
             changedBy: req.user.name || "Unknown",
-            field: editLogEntry.field || "Order",
+            field: (editLogEntry && editLogEntry.field) || "Order updated",
             changedAt: new Date(),
           });
           order.markModified("editLog");
