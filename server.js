@@ -9,7 +9,7 @@ const app = express();
 app.use(cors({
   origin: [
     "https://induscraft-oms.vercel.app",
-    "https://ops.induscraft.store",
+    "https://oms.induscraft.com",
     "http://localhost:5173",
   ],
   credentials: true,
