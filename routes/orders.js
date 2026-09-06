@@ -142,6 +142,11 @@ router.put("/:id", auth, async (req, res) => {
         if (updateData.dispatchDetails !== undefined) order.markModified("dispatchDetails");
         if (updateData.customer !== undefined) order.markModified("customer");
         if (updateData.orderSheetFiles !== undefined) order.markModified("orderSheetFiles");
+        if (updateData.status !== undefined) order.markModified("status");
+        if (updateData.notes !== undefined) order.markModified("notes");
+        if (updateData.deliveryConfirmed !== undefined) order.markModified("deliveryConfirmed");
+        if (updateData.costApproved !== undefined) order.markModified("costApproved");
+        if (updateData.marginOverride !== undefined) order.markModified("marginOverride");
 
         // Always append an edit-log entry, even if the frontend didn't supply a
         // specific field label — this is the safety net that makes logging
