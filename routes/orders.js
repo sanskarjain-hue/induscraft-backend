@@ -3,6 +3,7 @@ const router = express.Router();
 const auth = require("../middleware/auth");
 const Order = require("../models/Order");
 const cloudinary = require("cloudinary").v2;
+const { STRIP_PROJECTION, stripEnabled, restorePhotoData, clientView } = require("../utils/photoData");
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -55,7 +56,14 @@ router.get("/", auth, async (req, res) => {
     let filter = {};
     if (channel) filter.channel = channel;
     if (!includeArchived) filter.status = { $ne: "archived" };
-    const orders = await Order.find(filter).sort({ createdAt: -1 });
+    // Legacy orders carry photos as base64 text inside the document (photo.data), which made this
+    // list ~150 MB. The list leaves that out (see utils/photoData.js); a single order fetched by id
+    // still returns everything. Set STRIP_PHOTO_DATA=false in the environment to go back to the old behaviour.
+    const started = Date.now();
+    let query = Order.find(filter);
+    if (stripEnabled()) query = query.select(STRIP_PROJECTION);
+    const orders = await query.sort({ createdAt: -1 });
+    console.log(`[orders] list: ${orders.length} orders in ${Date.now() - started} ms (photo data ${stripEnabled() ? "left out" : "included"})`);
     res.json(orders);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -134,6 +142,16 @@ router.put("/:id", auth, async (req, res) => {
         order = await Order.findOne({ id: req.params.id });
         if (!order) return res.status(404).json({ error: "Order not found" });
 
+        // SAVE GUARD: the client may hold a copy of this order without its embedded photo data
+        // (the list leaves it out). Put the stored data back for any photo that arrives without it,
+        // so saving can never erase a photo whose embedded copy is the only copy.
+        if (updateData.items !== undefined) {
+          const g = restorePhotoData(updateData.items, order);
+          if (g.restored || g.absentFromPayload) {
+            console.log(`[photo-guard] ${req.params.id}: restored data on ${g.restored} photo(s); ${g.absentFromPayload} stored embedded photo(s) not in the incoming items (treated as deleted)`);
+          }
+        }
+
         Object.assign(order, updateData);
 
         if (updateData.items !== undefined) order.markModified("items");
@@ -174,7 +192,7 @@ router.put("/:id", auth, async (req, res) => {
       }
     }
 
-    res.json(order);
+    res.json(clientView(order));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
