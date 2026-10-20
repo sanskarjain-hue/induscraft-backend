@@ -94,6 +94,13 @@ const orderSchema = new mongoose.Schema({
     enum: ["Bangalore", "Pune", "Jodhpur", "Website", "Wholesale"],
     required: true,
   },
+  // One optional tag per order, used by the Wholesale/B2B channel (e.g. which
+  // marketplace/partner the order came through: Bonito Design, Homecentre, Home
+  // Town, or a custom one typed in at order creation). No enum — new tags are
+  // freely creatable from the frontend. Free text, not a ref, so there's nothing
+  // to migrate if a tag is renamed or retired later; the frontend just stops
+  // offering it as a default suggestion.
+  tag: { type: String, default: "" },
   date: String,
   salesperson: String,
   orderSheetFiles: [{ name: String, url: String, publicId: String }],
