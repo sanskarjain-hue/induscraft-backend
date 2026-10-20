@@ -14,7 +14,14 @@
  * Switch: set the environment variable STRIP_PHOTO_DATA=false to send photo data
  * again exactly as before. The save guard (2) always stays on; it is a no-op when
  * the client does send the data.
+ *
+ * GUARD VERSION 2 (needed before photos are migrated to Cloudinary): the guard also
+ * restores a stored photo's `url` and `publicId`. Without that, an order saved from a
+ * stale copy (one that predates the migration of a photo, so it has neither data nor url)
+ * would overwrite the migrated photo and leave it with nothing at all.
  */
+
+const GUARD_VERSION = 2;
 
 const PHOTO_FIELDS = ["images", "measurementPhotos", "rawPhotos", "finishingPhotos", "qcPhotos"];
 
@@ -24,33 +31,47 @@ const stripEnabled = () => String(process.env.STRIP_PHOTO_DATA || "true").toLowe
 // { "items.images.data": 0, "items.measurementPhotos.data": 0, ... }
 const STRIP_PROJECTION = Object.fromEntries(PHOTO_FIELDS.map(f => [`items.${f}.data`, 0]));
 
-/** Map of photo _id (string) -> embedded base64 data, for every photo in a stored order. */
-function buildDataIndex(storedOrder) {
+// The fields of a stored photo that a save must never lose just because the client did not send them back.
+const RECOVERABLE = ["data", "url", "publicId"];
+const present = v => typeof v === "string" && v.length > 0;
+
+/** Map of photo _id (string) -> { data, url, publicId } (only the ones that are set), for every photo in a stored order. */
+function buildPhotoIndex(storedOrder) {
   const index = new Map();
   for (const item of (storedOrder && storedOrder.items) || []) {
     for (const f of PHOTO_FIELDS) {
       for (const photo of (item && item[f]) || []) {
-        if (photo && photo._id != null && typeof photo.data === "string" && photo.data.length > 0) {
-          index.set(String(photo._id), photo.data);
-        }
+        if (!photo || photo._id == null) continue;
+        const kept = {};
+        for (const k of RECOVERABLE) if (present(photo[k])) kept[k] = photo[k];
+        if (Object.keys(kept).length) index.set(String(photo._id), kept);
       }
     }
   }
   return index;
 }
 
+/** Map of photo _id (string) -> embedded base64 data (kept for compatibility). */
+function buildDataIndex(storedOrder) {
+  const out = new Map();
+  for (const [id, kept] of buildPhotoIndex(storedOrder)) if (kept.data) out.set(id, kept.data);
+  return out;
+}
+
 /**
- * Save guard. For every photo in the incoming `items` that has an _id matching a stored
- * photo, but arrives WITHOUT its data, put the stored data back before the order is saved.
- * Photos with no _id (new uploads) are left alone. A photo that is simply absent from the
- * incoming array is treated as deleted by the user, exactly as before.
+ * Save guard. For every photo in the incoming `items` that has an _id matching a stored photo,
+ * but arrives WITHOUT some of its saved fields (data / url / publicId), put the stored value back
+ * before the order is saved. Never overwrites a value the client did send. Photos with no _id
+ * (new uploads) are left alone. A photo that is simply absent from the incoming array is treated
+ * as deleted by the user, exactly as before.
  * Mutates `items` in place. Returns counts for logging.
  */
 function restorePhotoData(items, storedOrder) {
   const result = { restored: 0, storedWithData: 0, absentFromPayload: 0 };
   if (!Array.isArray(items)) return result;
-  const index = buildDataIndex(storedOrder);
-  result.storedWithData = index.size;
+  const index = buildPhotoIndex(storedOrder);
+  const dataIds = new Set([...index].filter(([, kept]) => kept.data).map(([id]) => id));
+  result.storedWithData = dataIds.size;
   if (!index.size) return result;
 
   const seen = new Set();
@@ -62,14 +83,17 @@ function restorePhotoData(items, storedOrder) {
         if (!photo || typeof photo !== "object" || photo._id == null) continue;
         const key = String(photo._id);
         seen.add(key);
-        if (!photo.data) {
-          const stored = index.get(key);
-          if (stored) { photo.data = stored; result.restored++; }
+        const stored = index.get(key);
+        if (!stored) continue;
+        let changed = false;
+        for (const k of RECOVERABLE) {
+          if (!present(photo[k]) && stored[k]) { photo[k] = stored[k]; changed = true; }
         }
+        if (changed) result.restored++;
       }
     }
   }
-  for (const key of index.keys()) if (!seen.has(key)) result.absentFromPayload++;
+  for (const id of dataIds) if (!seen.has(id)) result.absentFromPayload++;
   return result;
 }
 
@@ -94,4 +118,4 @@ function clientView(order) {
   return out;
 }
 
-module.exports = { PHOTO_FIELDS, STRIP_PROJECTION, stripEnabled, restorePhotoData, stripPhotoDataInPlace, clientView, buildDataIndex };
+module.exports = { GUARD_VERSION, PHOTO_FIELDS, STRIP_PROJECTION, stripEnabled, restorePhotoData, stripPhotoDataInPlace, clientView, buildDataIndex, buildPhotoIndex };

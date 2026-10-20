@@ -59,7 +59,8 @@ app.get("/api/fix-sanskar", async (req, res) => {
 
 // ── HEALTH CHECK ──────────────────────────────────────────
 app.get("/", (req, res) => {
-  res.json({ status: "Induscraft OMS API is running", version: "1.0.0" });
+  // photoGuard: lets the photo-migration script confirm the save guard is live before it changes any data
+  res.json({ status: "Induscraft OMS API is running", version: "1.0.0", photoGuard: require("./utils/photoData").GUARD_VERSION });
 });
 
 // ── MONGODB ───────────────────────────────────────────────

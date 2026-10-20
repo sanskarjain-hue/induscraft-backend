@@ -148,7 +148,7 @@ router.put("/:id", auth, async (req, res) => {
         if (updateData.items !== undefined) {
           const g = restorePhotoData(updateData.items, order);
           if (g.restored || g.absentFromPayload) {
-            console.log(`[photo-guard] ${req.params.id}: restored data on ${g.restored} photo(s); ${g.absentFromPayload} stored embedded photo(s) not in the incoming items (treated as deleted)`);
+            console.log(`[photo-guard] ${req.params.id}: restored saved photo fields on ${g.restored} photo(s); ${g.absentFromPayload} stored embedded photo(s) not in the incoming items (treated as deleted)`);
           }
         }
 
